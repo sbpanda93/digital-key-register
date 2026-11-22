@@ -1,4 +1,4 @@
-/* Paste the deployed Apps Script Web App URL here. Keep the final /exec URL. */
+/* Apps Script Web App endpoint. Keep the final /exec URL. */
 window.DKR_CONFIG = {
-  apiUrl: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_EXEC_URL_HERE'
+  apiUrl: "https://script.google.com/macros/s/AKfycbwchGabdSisUxskiiAnlxVZAZ_RZWRc9xDeqYCmzeoNOJU7fuw_k0KlQa2zchcfCQObEg/exec"
 };
