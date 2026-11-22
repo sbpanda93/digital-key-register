@@ -16,10 +16,143 @@
   function toast(message){const el=$('#toast');el.textContent=message;el.classList.add('show');clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>el.classList.remove('show'),3000);}
   function istShift(){const p=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());const t=Number(p.find(x=>x.type==='hour').value)*60+Number(p.find(x=>x.type==='minute').value);return t>=360&&t<840?'A':t>=840&&t<1320?'B':'C';}
   function istDateTime(value){if(!value)return '—';const d=new Date(value);return Number.isNaN(d.getTime())?esc(value):new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)+' IST';}
-  function renderLogin(error=''){
-    app.innerHTML=`<main class="login-wrap"><section class="login-card"><div class="brand"><div class="brand-mark">🗝</div><div>Digital Key Register<small>Green Anode Plant · Control Room</small></div></div><h1>Sign in</h1><div class="subtle">Use your assigned register account.</div>${error?`<div class="notice error">${esc(error)}</div>`:''}<form class="form-grid" id="login-form"><div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required></div><div class="field"><label for="password">Password / PIN</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><button class="btn" type="submit">Sign in</button></form><div class="server-note">IST · Asia/Kolkata</div></section></main>`;
-    $('#login-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('button',e.currentTarget);button.disabled=true;button.textContent='Signing in…';try{const x=await api('login',{username:$('#username').value,password:$('#password').value});state.token=x.token;state.user=x.user;localStorage.setItem('dkr_token',x.token);localStorage.setItem('dkr_user',JSON.stringify(x.user));await refresh();}catch(err){renderLogin(err.message);} });
+  function renderLogin(error='', notice='', username=''){
+    app.innerHTML=`<main class="login-wrap"><section class="login-card"><div class="brand"><div class="brand-mark">🗝</div><div>Digital Key Register<small>Green Anode Plant · Control Room</small></div></div><h1>Sign in</h1><div class="subtle">Use your assigned register account.</div>${error?`<div class="notice error">${esc(error)}</div>`:''}<form class="form-grid" id="login-form"><div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" value="${esc(username)}" required></div><div class="field"><label for="password">Password / PIN</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><button class="btn" type="submit">Sign in</button></form><div class="server-note">IST · Asia/Kolkata</div></section></main>`;
+    const loginForm = $('#login-form');
+    if (notice) {
+      const message = document.createElement('div');
+      message.className = 'notice';
+      message.textContent = notice;
+      loginForm.before(message);
+    }
+    loginForm.insertAdjacentHTML('afterend','<div class="actions"><button class="btn outline" type="button" id="request-access">Request access</button></div>');
+    $('#request-access').onclick = renderRequestAccess;
+    loginForm.addEventListener('submit',async e=>{e.preventDefault();const button=$('button',e.currentTarget);button.disabled=true;button.textContent='Signing in…';try{const x=await api('login',{username:$('#username').value,password:$('#password').value});state.token=x.token;state.user=x.user;localStorage.setItem('dkr_token',x.token);localStorage.setItem('dkr_user',JSON.stringify(x.user));await refresh();}catch(err){renderLogin(err.message);} });
   }
+  function accessPage(content) {
+    app.innerHTML = `<main class="login-wrap"><section class="login-card">${content}
+      <div class="actions"><button class="btn outline" type="button" id="back-sign-in">Back to sign in</button></div>
+    </section></main>`;
+    $('#back-sign-in').onclick = () => renderLogin();
+  }
+
+  function renderRequestAccess() {
+    accessPage(`<h1>Request access</h1><p class="subtle">Submit your details for admin review.</p>
+      <form class="form-grid" id="access-form">
+        <div class="field"><label for="request-name">Full name</label><input id="request-name" name="name" autocomplete="name" maxlength="80" required></div>
+        <div class="field"><label for="request-badge">Employee or gate pass number</label><input id="request-badge" name="badge" maxlength="32" required></div>
+        <div class="field"><label for="request-dept">Department / agency</label><input id="request-dept" name="department" maxlength="80" required></div>
+        <div class="field"><label for="request-contact">Mobile number</label><input id="request-contact" name="contact" inputmode="numeric" autocomplete="tel-national" pattern="[1-9][0-9]{9}" maxlength="10" required></div>
+        <div class="field"><label for="request-role">Requested role</label>${accessRoles('request-role')}</div>
+        <div hidden><label for="request-website">Leave blank</label><input id="request-website" name="website" tabindex="-1" autocomplete="off"></div>
+        <p class="subtle">Your details are visible to the register admin for access review.</p>
+        <div data-access-feedback role="status"></div><button class="btn">Submit request</button>
+      </form>`);
+    bindAccessForm($('#access-form'), async values => {
+      await api('submitAccessRequest', values);
+      accessPage('<h1>Request received</h1><p>The register admin will review your request and share a setup link if approved.</p>');
+    });
+  }
+
+  function accessRoles(id) {
+    return `<select name="role" id="${id}"><option value="USER">User</option><option value="OPERATOR">Operator</option></select>`;
+  }
+
+  function bindAccessForm(form, submit) {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(form));
+      const buttons = $$('button', form);
+      const feedback = $('[data-access-feedback]', form);
+      feedback.className = '';
+      feedback.textContent = '';
+      buttons.forEach(button => { button.disabled = true; });
+      try {
+        await submit(values, event.submitter?.value);
+      } catch (error) {
+        feedback.className = 'notice error';
+        feedback.textContent = error.message;
+        buttons.forEach(button => { button.disabled = false; });
+      }
+    };
+  }
+
+  function renderAccountSetup(setup) {
+    accessPage(`<h1>Set your password</h1><p class="subtle">Choose a password of at least 12 characters.</p>
+      <form class="form-grid" id="account-setup-form">
+        <div class="field"><label for="setup-password">New password</label><input id="setup-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></div>
+        <div class="field"><label for="setup-repeat">Confirm password</label><input id="setup-repeat" name="repeat" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></div>
+        <div data-access-feedback role="status"></div><button class="btn">Activate account</button>
+      </form>`);
+    bindAccessForm($('#account-setup-form'), async ({password, repeat}) => {
+      if (password !== repeat) throw new Error('The passwords do not match.');
+      const result = await api('activateAccessRequest', {...setup, password});
+      renderLogin('', 'Account activated. Sign in with your new password.', result.username);
+    });
+  }
+
+  function renderAccessRequests() {
+    const requests = state.data.accessRequests || [];
+    return `<section class="panel"><div class="section-head"><h2>Access Requests</h2>
+      <span class="chip">${requests.filter(item => item.status === 'PENDING').length} pending</span></div>
+      ${requests.length ? `<div class="cards">${requests.map(item => `<article class="key-card">
+        <div class="key-title">${esc(item.name)}</div>
+        <div class="key-meta">${esc(item.department)} · ID ${esc(item.badge)} · ${esc(item.contact)}<br>
+          ${item.status === 'PENDING' ? `Requested ${esc(item.requestedRole)} · ${istDateTime(item.submittedAt)}`
+            : `@${esc(item.username)} · ${esc(item.role)} · Awaiting password setup<br>Link expires ${istDateTime(item.expiresAt)}`}</div>
+        <div class="actions"><button class="btn outline small" data-review-access="${esc(item.id)}">
+          ${item.status === 'PENDING' ? 'Review request' : 'Replace setup link'}
+        </button></div></article>`).join('')}</div>` : '<div class="empty">No requests awaiting review or setup.</div>'}
+    </section>`;
+  }
+
+  function openAccessReview(id) {
+    const item = (state.data.accessRequests || []).find(request => request.id === id);
+    if (!item) return;
+    const pending = item.status === 'PENDING';
+    const modal = openModal(`<div class="dialog-head"><h2>${pending ? 'Review access request' : 'Replace setup link'}</h2>
+      <button class="close" aria-label="Close">×</button></div>
+      <form class="form-grid" id="review-access-form">
+        <p><strong>${esc(item.name)}</strong> · ${esc(item.department)}<br>ID ${esc(item.badge)} · ${esc(item.contact)}</p>
+        ${pending ? `<p class="subtle">Requested role is ${esc(item.requestedRole)}. Verify the employee or gate pass number before approving.</p>
+          <div class="field"><label for="approval-username">Assign username</label><input id="approval-username" name="username" minlength="3" maxlength="32" autocapitalize="none" required></div>
+          <div class="field"><label for="approved-role">Approve as</label>${accessRoles('approved-role')}</div>`
+          : '<p class="subtle">The previous setup link will stop working.</p>'}
+        <div data-access-feedback role="status"></div>
+        <div class="actions"><button class="btn" value="${pending ? 'approve' : 'renew'}">${pending ? 'Approve request' : 'Generate new link'}</button>
+        ${pending ? '<button class="btn outline" value="reject" formnovalidate>Reject request</button>' : ''}</div>
+      </form>`);
+    bindAccessForm($('#review-access-form', modal), async (values, decision) => {
+      const result = await api('reviewAccessRequest', {...values, id, decision:decision || (pending ? 'approve' : 'renew')});
+      modal.remove();
+      if (result.token) showSetupLink(result);
+      else toast('Request rejected.');
+      await refresh();
+    });
+  }
+
+  function showSetupLink({id, token, username, expiresAt}) {
+    const setupUrl = new URL(location.pathname, location.origin);
+    setupUrl.hash = new URLSearchParams({request:id, setup:token}).toString();
+    const modal = openModal(`<div class="dialog-head"><h2>Account setup link</h2><button class="close" aria-label="Close">×</button></div>
+      <div class="form-grid"><p>Share this one-time link privately with <strong>@${esc(username)}</strong>. It expires ${istDateTime(expiresAt)}.</p>
+      <div class="field"><label for="approved-setup-link">Setup link</label><input id="approved-setup-link" readonly></div>
+      <button type="button" class="btn" id="copy-setup-link">Copy link</button></div>`);
+    const input = $('#approved-setup-link', modal);
+    input.value = setupUrl.href;
+    $('#copy-setup-link', modal).onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(input.value);
+        toast('Setup link copied.');
+      } catch {
+        input.focus();
+        input.select();
+        toast('Copy the selected setup link.');
+      }
+    };
+  }
+
+
   async function refresh(){try{state.data=await api('dashboard');render();}catch(e){toast(e.message);if(!state.user)renderLogin(e.message);}}
   function tabs(){const all=[['dashboard','▦','Dashboard'],['issue','＋','Issue'],['handovers','⇄','Handovers'],['history','≡','History'],['admin','⚙','Admin']];return all.filter(([id])=>id!=='issue'||['ADMIN','OPERATOR'].includes(state.user.Role)).filter(([id])=>id!=='history'||['ADMIN','OPERATOR'].includes(state.user.Role)).filter(([id])=>id!=='admin'||state.user.Role==='ADMIN');}
   function header(){return `<header class="topbar"><div class="brand"><div class="brand-mark">🗝</div><div>Digital Key Register<small>GAP · Control Room</small></div></div><div class="top-actions"><div class="user-chip"><strong>${esc(state.user.Full_Name)}</strong>${esc(state.user.Role)}</div><button class="icon-btn" id="logout" aria-label="Sign out">↪</button></div></header>`;}
@@ -35,15 +168,16 @@
   function renderHistory(){return `<section class="panel"><div class="section-head"><h2>Issue and return ledger</h2><button class="btn secondary small" id="export-csv">Export CSV</button></div><div class="filters"><div class="filter"><label>From date</label><input type="date" id="filter-from" value="${esc(state.historyFilters.from||'')}"></div><div class="filter"><label>To date</label><input type="date" id="filter-to" value="${esc(state.historyFilters.to||'')}"></div><div class="filter"><label>Shift</label><select id="filter-shift"><option value="">All shifts</option>${['A','B','C','General'].map(s=>`<option ${state.historyFilters.shift===s?'selected':''}>${s}</option>`).join('')}</select></div><div class="filter"><label>Status</label><select id="filter-status"><option value="">All statuses</option>${['OUT','PENDING_HANDOVER','RETURNED'].map(s=>`<option ${state.historyFilters.status===s?'selected':''}>${s}</option>`).join('')}</select></div><div class="filter"><label>Key / person</label><input id="filter-query" value="${esc(state.historyFilters.query||'')}" placeholder="Search"></div></div><button class="btn small" id="apply-history">Apply filters</button><div id="history-results" class="empty">Use filters to load records.</div></section>`;}
   function renderAdmin(){
     if(state.user.Role!=='ADMIN')return '<section class="panel empty">Admin access required.</section>';
-    return `<div class="split">
+    return `${renderAccessRequests()}<div class="split">
       <section class="panel"><h2>Key master</h2><form id="key-form" class="form-grid"><div class="field"><label>Key name</label><input name="name" required maxlength="80"></div><div class="field"><label>Location / area</label><input name="area" required maxlength="80"></div><button class="btn">Add key</button></form><div class="key-select" style="margin-top:14px">${state.data.keys.map(k=>`<div class="select-key"><span><strong>${esc(k.Key_Name)}</strong><small>${esc(k.Location_Area)} · ${esc(k.Status)}</small></span><button class="btn outline small" data-edit-key="${esc(k.Key_ID)}">Edit</button></div>`).join('')}</div></section>
       <section class="panel"><h2>Add registered user</h2><form id="user-form" class="form-grid two"><div class="field"><label>Full name</label><input name="name" required></div><div class="field"><label>Username</label><input name="username" required pattern="[a-zA-Z0-9._-]{3,32}"></div><div class="field"><label>Contact number</label><input name="contact" required inputmode="numeric" pattern="[0-9]{10}" maxlength="10"></div><div class="field"><label>Department</label><input name="department" required></div><div class="field"><label>Role</label><select name="role"><option>USER</option><option>OPERATOR</option><option>ADMIN</option></select></div><div class="field"><label>Initial password (8+ chars)</label><input name="password" type="password" required minlength="8"></div><button class="btn">Create user</button></form>
-      <h3 style="margin-top:22px">User accounts</h3><div class="key-select">${state.data.userAdmin.map(u=>`<div class="select-key"><span><strong>${esc(u.Full_Name)} <small>(${esc(u.Role)} · ${u.Active==='TRUE'?'Active':'Disabled'})</small></strong><small>${esc(u.Username)} · ${esc(u.Department)} · ${esc(u.Contact_No)}</small></span>${u.User_ID!==state.user.User_ID?`<button class="btn ${u.Active==='TRUE'?'secondary':'outline'} small" data-active-user="${esc(u.User_ID)}" data-active="${u.Active==='TRUE'?'false':'true'}">${u.Active==='TRUE'?'Disable':'Enable'}</button>`:''}</div>`).join('')}</div></section></div>
+      <h3 style="margin-top:22px">User accounts</h3><div class="key-select">${state.data.userAdmin.map(u=>`<div class="select-key"><span><strong>${esc(u.Full_Name)} <small>(${esc(u.Role)} · ${u.Awaiting_Setup?'Awaiting setup':u.Active==='TRUE'?'Active':'Disabled'})</small></strong><small>${esc(u.Username)} · ${esc(u.Department)} · ${esc(u.Contact_No)}</small></span>${u.User_ID!==state.user.User_ID&&!u.Awaiting_Setup?`<button class="btn ${u.Active==='TRUE'?'secondary':'outline'} small" data-active-user="${esc(u.User_ID)}" data-active="${u.Active==='TRUE'?'false':'true'}">${u.Active==='TRUE'?'Disable':'Enable'}</button>`:''}</div>`).join('')}</div></section></div>
       <section class="panel"><h2>Register settings</h2><form id="settings-form" class="form-grid two"><div class="field"><label>Overdue threshold (hours)</label><input type="number" name="overdueHours" min="1" max="168" value="${esc(state.data.settings.overdueHours)}" required></div><button class="btn">Save setting</button></form></section>
-      <section class="panel"><h2>Change my password</h2><form id="password-form" class="form-grid two"><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password (8+ characters)</label><input name="newPassword" type="password" minlength="8" required></div><button class="btn">Update password</button></form><div class="notice">Keep each user account individual. Change the default admin password immediately after initial setup.</div></section>`;
+      <section class="panel"><h2>Change my password</h2><form id="password-form" class="form-grid two"><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password (8+ characters)</label><input name="newPassword" type="password" minlength="8" required></div><button class="btn">Update password</button></form><div class="notice">Keep each user account individual. Share setup links privately with the approved account holder.</div></section>`;
   }
   function bindCommon(){ $('#logout').onclick=()=>logout(true);$('#refresh').onclick=refresh;$$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;render();if(state.tab==='history')loadHistory();});$$('[data-jump]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.jump;render();});$$('[data-return]').forEach(b=>b.onclick=()=>openReturn([b.dataset.return]));if($('#bulk-return'))$('#bulk-return').onclick=()=>{const ids=$$('[data-bulk-tx]:checked').map(x=>x.dataset.bulkTx);if(!ids.length){toast('Select one or more keys to return.');return;}const chosen=ids.map(id=>(state.data.out||[]).find(t=>t.Tx_ID===id));if(chosen.some(t=>t.Current_Holder_UserID!==chosen[0].Current_Holder_UserID||t.Current_Holder_Name!==chosen[0].Current_Holder_Name||t.Current_Holder_Contact!==chosen[0].Current_Holder_Contact)){toast('Bulk return is limited to keys held by the same person.');return;}openReturn(ids);};$$('[data-handover]').forEach(b=>b.onclick=()=>openHandover(b.dataset.handover));$$('[data-confirm]').forEach(b=>b.onclick=()=>doAction('handoverConfirm',{handoverId:b.dataset.confirm},'Handover confirmed.'));$$('[data-reject]').forEach(b=>b.onclick=()=>doAction('handoverReject',{handoverId:b.dataset.reject},'Handover rejected.'));$$('[data-active-user]').forEach(b=>b.onclick=()=>doAction('setUserActive',{userId:b.dataset.activeUser,active:b.dataset.active==='true'},b.dataset.active==='true'?'User enabled.':'User disabled.'));$$('[data-edit-key]').forEach(b=>b.onclick=()=>openEditKey(b.dataset.editKey));
     if($('#holder-type')){$('#holder-type').onchange=()=>{$('#registered-fields').classList.toggle('hidden',$('#holder-type').value!=='REGISTERED');$('#guest-fields').classList.toggle('hidden',$('#holder-type').value!=='GUEST');};$('#issue-shift').value=istShift();$('#registered-search').oninput=e=>{const found=state.data.users.find(x=>`${x.Full_Name} · ${x.Department} (@${x.Username})`===e.target.value);$('#registered-user').value=found?found.User_ID:'';$('#registered-details').textContent=found?`${found.Full_Name} · ${found.Contact_No} · ${found.Department}`:'Choose an exact match from the registered user list.';};$('#issue-form').onsubmit=submitIssue;}
+    $$('[data-review-access]').forEach(button => { button.onclick = () => openAccessReview(button.dataset.reviewAccess); });
     if($('#key-form'))$('#key-form').onsubmit=async e=>{e.preventDefault();const x=Object.fromEntries(new FormData(e.currentTarget));await doAction('saveKey',{name:x.name,area:x.area},'Key added.');};
     if($('#user-form'))$('#user-form').onsubmit=async e=>{e.preventDefault();await doAction('saveUser',Object.fromEntries(new FormData(e.currentTarget)),'User created.');};
     if($('#settings-form'))$('#settings-form').onsubmit=async e=>{e.preventDefault();await doAction('settings',{overdueHours:$('#settings-form [name=overdueHours]').value},'Setting saved.');};
@@ -59,5 +193,14 @@
   function openReturn(ids){const tx=(state.data.out||[]).find(t=>t.Tx_ID===ids[0]);if(!tx)return;const modal=openModal(`<div class="dialog-head"><div><h2 style="margin:0">Return ${ids.length>1?'keys':'key'}</h2><div class="subtle">${esc(tx.Key_Name)} · held by ${esc(tx.Current_Holder_Name)}</div></div><button class="close" aria-label="Close">×</button></div><form id="return-form" class="form-grid"><label class="toggle-row"><input type="checkbox" id="third-party"> Returned by a different person?</label><div id="third-fields" class="form-grid hidden"><div class="field"><label>Returned by name</label><input name="returnedByName"></div><div class="field"><label>Returned by contact number</label><input name="returnedByContact" inputmode="numeric" maxlength="10" pattern="[0-9]{10}"></div><div class="field"><label>Reason for third-party return <b>*</b></label><textarea name="reason"></textarea></div></div><div class="notice">Receipt will be logged under ${esc(state.user.Full_Name)}.</div><button class="btn" type="submit">Confirm return</button></form>`);$('#third-party',modal).onchange=e=>$('#third-fields',modal).classList.toggle('hidden',!e.target.checked);$('#return-form',modal).onsubmit=async e=>{e.preventDefault();const third=$('#third-party',modal).checked,fd=new FormData(e.currentTarget),payload={txIds:ids,thirdParty:third};if(third){payload.returnedByName=fd.get('returnedByName');payload.returnedByContact=fd.get('returnedByContact');payload.reason=fd.get('reason');}try{await api('return',payload);modal.remove();toast(`${ids.length} key(s) returned.`);await refresh();}catch(err){toast(err.message);}};}
   function openHandover(txId){const tx=(state.data.out||[]).find(t=>t.Tx_ID===txId)||state.data.mine.find(t=>t.Tx_ID===txId);if(!tx||tx.Holder_Type==='GUEST'){toast('Guest-issued keys cannot be transferred.');return;}const modal=openModal(`<div class="dialog-head"><div><h2 style="margin:0">Handover key</h2><div class="subtle">${esc(tx.Key_Name)} · ${esc(tx.Current_Holder_Name)}</div></div><button class="close" aria-label="Close">×</button></div><form id="handover-form" class="form-grid"><div class="field"><label>Receiving registered user</label><select name="toUserId" required><option value="">Choose a person…</option>${state.data.users.filter(x=>x.User_ID!==tx.Current_Holder_UserID).map(x=>`<option value="${esc(x.User_ID)}">${esc(x.Full_Name)} · ${esc(x.Department)}</option>`).join('')}</select></div><div class="field"><label>Target shift</label><select name="toShift"><option>A</option><option>B</option><option>C</option><option>General</option></select></div><div class="field"><label>Remarks (optional)</label><textarea name="remarks" maxlength="200"></textarea></div><div class="notice">The key will be marked pending until the receiving user signs in and confirms receipt. Only registered users can receive a handover.</div><button class="btn">Send confirmation request</button></form>`);$('#handover-form',modal).onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.currentTarget));try{await api('handoverInitiate',{txId,toUserId:f.toUserId,toShift:f.toShift,remarks:f.remarks});modal.remove();toast('Handover request sent.');await refresh();}catch(err){toast(err.message);}};}
   function logout(show=true){if(state.token)api('logout').catch(()=>{});state.token='';state.user=null;state.data=null;localStorage.removeItem('dkr_token');localStorage.removeItem('dkr_user');if(show)renderLogin();}
-  if(state.token&&state.user)refresh();else renderLogin();
+  const setupParams = new URLSearchParams(location.hash.slice(1));
+  if (setupParams.has('setup')) {
+    const setup = {id:setupParams.get('request'), setupToken:setupParams.get('setup')};
+    history.replaceState(null, '', location.pathname + location.search);
+    renderAccountSetup(setup);
+  } else if (state.token && state.user) {
+    refresh();
+  } else {
+    renderLogin();
+  }
 })();
