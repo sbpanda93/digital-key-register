@@ -78,16 +78,17 @@
   }
 
   function renderAccountSetup(setup) {
-    accessPage(`<h1>Set your password</h1><p class="subtle">Choose a password of at least 12 characters.</p>
+    accessPage(`<h1>Set up your account</h1><p class="subtle">Choose your username and a password of at least 12 characters.</p>
       <form class="form-grid" id="account-setup-form">
+        <div class="field"><label for="setup-username">Username</label><input id="setup-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required></div>
         <div class="field"><label for="setup-password">New password</label><input id="setup-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></div>
         <div class="field"><label for="setup-repeat">Confirm password</label><input id="setup-repeat" name="repeat" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></div>
         <div data-access-feedback role="status"></div><button class="btn">Activate account</button>
       </form>`);
-    bindAccessForm($('#account-setup-form'), async ({password, repeat}) => {
+    bindAccessForm($('#account-setup-form'), async ({username, password, repeat}) => {
       if (password !== repeat) throw new Error('The passwords do not match.');
-      const result = await api('activateAccessRequest', {...setup, password});
-      renderLogin('', 'Account activated. Sign in with your new password.', result.username);
+      const result = await api('activateAccessRequest', {...setup, username, password});
+      renderLogin('', 'Account activated. Sign in with your username and password.', result.username);
     });
   }
 
@@ -99,7 +100,7 @@
         <div class="key-title">${esc(item.name)}</div>
         <div class="key-meta">${esc(item.department)} · ID ${esc(item.badge)} · ${esc(item.contact)}<br>
           ${item.status === 'PENDING' ? `Requested ${esc(item.requestedRole)} · ${istDateTime(item.submittedAt)}`
-            : `@${esc(item.username)} · ${esc(item.role)} · Awaiting password setup<br>Link expires ${istDateTime(item.expiresAt)}`}</div>
+            : `${esc(item.role)} · Awaiting account setup<br>Link expires ${istDateTime(item.expiresAt)}`}</div>
         <div class="actions"><button class="btn outline small" data-review-access="${esc(item.id)}">
           ${item.status === 'PENDING' ? 'Review request' : 'Replace setup link'}
         </button></div></article>`).join('')}</div>` : '<div class="empty">No requests awaiting review or setup.</div>'}
@@ -115,7 +116,6 @@
       <form class="form-grid" id="review-access-form">
         <p><strong>${esc(item.name)}</strong> · ${esc(item.department)}<br>ID ${esc(item.badge)} · ${esc(item.contact)}</p>
         ${pending ? `<p class="subtle">Requested role is ${esc(item.requestedRole)}. Verify the employee or gate pass number before approving.</p>
-          <div class="field"><label for="approval-username">Assign username</label><input id="approval-username" name="username" minlength="3" maxlength="32" autocapitalize="none" required></div>
           <div class="field"><label for="approved-role">Approve as</label>${accessRoles('approved-role')}</div>`
           : '<p class="subtle">The previous setup link will stop working.</p>'}
         <div data-access-feedback role="status"></div>
@@ -125,17 +125,17 @@
     bindAccessForm($('#review-access-form', modal), async (values, decision) => {
       const result = await api('reviewAccessRequest', {...values, id, decision:decision || (pending ? 'approve' : 'renew')});
       modal.remove();
-      if (result.token) showSetupLink(result);
+      if (result.token) showSetupLink(result, item.name);
       else toast('Request rejected.');
       await refresh();
     });
   }
 
-  function showSetupLink({id, token, username, expiresAt}) {
+  function showSetupLink({id, token, expiresAt}, name) {
     const setupUrl = new URL(location.pathname, location.origin);
     setupUrl.hash = new URLSearchParams({request:id, setup:token}).toString();
     const modal = openModal(`<div class="dialog-head"><h2>Account setup link</h2><button class="close" aria-label="Close">×</button></div>
-      <div class="form-grid"><p>Share this one-time link privately with <strong>@${esc(username)}</strong>. It expires ${istDateTime(expiresAt)}.</p>
+      <div class="form-grid"><p>Share this one-time link privately with <strong>${esc(name)}</strong>. They will choose their username and password. It expires ${istDateTime(expiresAt)}.</p>
       <div class="field"><label for="approved-setup-link">Setup link</label><input id="approved-setup-link" readonly></div>
       <button type="button" class="btn" id="copy-setup-link">Copy link</button></div>`);
     const input = $('#approved-setup-link', modal);
@@ -171,7 +171,7 @@
     return `${renderAccessRequests()}<div class="split">
       <section class="panel"><h2>Key master</h2><form id="key-form" class="form-grid"><div class="field"><label>Key name</label><input name="name" required maxlength="80"></div><div class="field"><label>Location / area</label><input name="area" required maxlength="80"></div><button class="btn">Add key</button></form><div class="key-select" style="margin-top:14px">${state.data.keys.map(k=>`<div class="select-key"><span><strong>${esc(k.Key_Name)}</strong><small>${esc(k.Location_Area)} · ${esc(k.Status)}</small></span><button class="btn outline small" data-edit-key="${esc(k.Key_ID)}">Edit</button></div>`).join('')}</div></section>
       <section class="panel"><h2>Add registered user</h2><form id="user-form" class="form-grid two"><div class="field"><label>Full name</label><input name="name" required></div><div class="field"><label>Username</label><input name="username" required pattern="[a-zA-Z0-9._-]{3,32}"></div><div class="field"><label>Contact number</label><input name="contact" required inputmode="numeric" pattern="[0-9]{10}" maxlength="10"></div><div class="field"><label>Department</label><input name="department" required></div><div class="field"><label>Role</label><select name="role"><option>USER</option><option>OPERATOR</option><option>ADMIN</option></select></div><div class="field"><label>Initial password (8+ chars)</label><input name="password" type="password" required minlength="8"></div><button class="btn">Create user</button></form>
-      <h3 style="margin-top:22px">User accounts</h3><div class="key-select">${state.data.userAdmin.map(u=>`<div class="select-key"><span><strong>${esc(u.Full_Name)} <small>(${esc(u.Role)} · ${u.Awaiting_Setup?'Awaiting setup':u.Active==='TRUE'?'Active':'Disabled'})</small></strong><small>${esc(u.Username)} · ${esc(u.Department)} · ${esc(u.Contact_No)}</small></span>${u.User_ID!==state.user.User_ID&&!u.Awaiting_Setup?`<button class="btn ${u.Active==='TRUE'?'secondary':'outline'} small" data-active-user="${esc(u.User_ID)}" data-active="${u.Active==='TRUE'?'false':'true'}">${u.Active==='TRUE'?'Disable':'Enable'}</button>`:''}</div>`).join('')}</div></section></div>
+      <h3 style="margin-top:22px">User accounts</h3><div class="key-select">${state.data.userAdmin.map(u=>`<div class="select-key"><span><strong>${esc(u.Full_Name)} <small>(${esc(u.Role)} · ${u.Awaiting_Setup?'Awaiting setup':u.Active==='TRUE'?'Active':'Disabled'})</small></strong><small>${esc(u.Username || 'Username pending')} · ${esc(u.Department)} · ${esc(u.Contact_No)}</small></span>${u.User_ID!==state.user.User_ID&&!u.Awaiting_Setup?`<button class="btn ${u.Active==='TRUE'?'secondary':'outline'} small" data-active-user="${esc(u.User_ID)}" data-active="${u.Active==='TRUE'?'false':'true'}">${u.Active==='TRUE'?'Disable':'Enable'}</button>`:''}</div>`).join('')}</div></section></div>
       <section class="panel"><h2>Register settings</h2><form id="settings-form" class="form-grid two"><div class="field"><label>Overdue threshold (hours)</label><input type="number" name="overdueHours" min="1" max="168" value="${esc(state.data.settings.overdueHours)}" required></div><button class="btn">Save setting</button></form></section>
       <section class="panel"><h2>Change my password</h2><form id="password-form" class="form-grid two"><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password (8+ characters)</label><input name="newPassword" type="password" minlength="8" required></div><button class="btn">Update password</button></form><div class="notice">Keep each user account individual. Share setup links privately with the approved account holder.</div></section>`;
   }
